@@ -1,4 +1,12 @@
-#!/bin/sh
+#!/usr/bin/env bash
+# c8k.in/stall.sh - Easiest Apache CloudStack Installer
+# Install with this command (from your Ubuntu host):
+#
+# curl -sSfL https://c8k.in/stall.sh | bash
+# Make sure you have `curl` installed
+#
+# Author: Rohit Yadav <rohit@apache.org>
+#
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
@@ -18,3 +26,18 @@
 
 set -e
 set -o noglob
+
+# --- helper functions for logs ---
+info()
+{
+    echo '[INFO] ' "$@"
+}
+warn()
+{
+    echo '[WARN] ' "$@" >&2
+}
+fatal()
+{
+    echo '[ERROR] ' "$@" >&2
+    exit 1
+}
