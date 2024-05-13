@@ -25,6 +25,11 @@
 set -e
 set -o noglob
 
+CS_VERSION=4.18
+INTERFACE=
+BRIDGE=cloudbr0
+HOST_IP=
+
 # --- helper functions for logs ---
 info()
 {
@@ -41,6 +46,7 @@ fatal()
 }
 
 ### Intro ###
+
 echo "
 ░█████╗░░█████╗░██╗░░██╗░░░██╗███╗░░██╗
 ██╔══██╗██╔══██╗██║░██╔╝░░░██║████╗░██║
@@ -51,7 +57,7 @@ echo "
 CloudStack Installer By 🅁🄾🄷🄸🅃 🅈🄰🄳🄰🅅
 "
 info "Installing Apache CloudStack All-In-One-Box"
-info "NOTE: this works only on Ubuntu, and run as 'root' user!"
+info "NOTE: this works only on Ubuntu 22.04 (tested), and run as 'root' user!"
 
 if [[ $EUID -ne 0 ]]; then
    fatal "This script must be run as root"
@@ -67,16 +73,18 @@ apt-get install -y openssh-server sudo vim htop tar bridge-utils
 
 ### Setup Bridge ###
 
-#FIXME: we want to avoid virtual nics
-# ls -l /sys/class/net/ | grep -v virtual
+setup_bridge() {
+  if brctl show $BRIDGE > /dev/null; then
+    return
+  fi
 
-interface=$(ls /sys/class/net/ | grep -v 'lo' | head -1)
-gateway=$(ip route show 0.0.0.0/0 dev ens3 | cut -d\  -f3)
-hostip=$(ip -f inet addr show $interface | sed -En -e 's/.*inet ([0-9.]+).*/\1/p')
-
-info "Setting up bridge on $interface which has IP $hostip and gateway $gateway"
-
-echo "network:
+  #FIXME: we want to avoid virtual nics
+  # ls -l /sys/class/net/ | grep -v virtual
+  interface=$(ls /sys/class/net/ | grep -v 'lo' | head -1)
+  gateway=$(ip route show 0.0.0.0/0 dev ens3 | cut -d\  -f3)
+  hostip=$(ip -f inet addr show $interface | sed -En -e 's/.*inet ([0-9.]+).*/\1/p')
+  info "Setting up bridge on $interface which has IP $hostip and gateway $gateway"
+  echo "network:
    version: 2
    renderer: networkd
    ethernets:
@@ -85,7 +93,7 @@ echo "network:
        dhcp6: false
        optional: true
    bridges:
-     cloudbr0:
+     $BRIDGE:
        addresses: [$hostip/24]
        routes:
         - to: default
@@ -99,9 +107,153 @@ echo "network:
          stp: false
          forward-delay: 0" > /etc/netplan/01-netcfg.yaml
 
-info "Disabling cloud-init netplan config"
-rm -f /etc/netplan/50-cloud-init.yaml
-echo "network: {config: disabled}" > /etc/cloud/cloud.cfg.d/99-disable-network-config.cfg
+  info "Disabling cloud-init netplan config"
+  rm -f /etc/netplan/50-cloud-init.yaml
+  echo "network: {config: disabled}" > /etc/cloud/cloud.cfg.d/99-disable-network-config.cfg
 
-netplan generate
-netplan apply
+  netplan generate
+  netplan apply
+
+  export INTERFACE=$interface
+}
+
+### Setup CloudStack Packages ###
+
+configure_repo() {
+  info "Configuring CloudStack $CS_VERSION repo"
+  mkdir -p /etc/apt/keyrings
+  wget -O- http://packages.shapeblue.com/release.asc 2>/dev/null | gpg --dearmor | sudo tee /etc/apt/keyrings/cloudstack.gpg > /dev/null
+  echo deb [signed-by=/etc/apt/keyrings/cloudstack.gpg] http://packages.shapeblue.com/cloudstack/upstream/debian/$CS_VERSION / > /etc/apt/sources.list.d/cloudstack.list
+  apt-get update
+}
+
+install_packages() {
+  info "Installing CloudStack $CS_VERSION, MySQL and NFS server"
+  if dpkg -l | grep cloudstack-management > /dev/null; then
+    warn "CloudStack packages seem to be already installed, skipping CloudStack packages installation"
+    apt-get install -y mysql-server nfs-kernel-server quota qemu-kvm
+  else
+    apt-get install -y cloudstack-management cloudstack-usage mysql-server nfs-kernel-server quota qemu-kvm cloudstack-agent
+    systemctl daemon-reload
+    systemctl stop cloudstack-management cloudstack-usage cloudstack-agent
+  fi
+}
+
+### Configure Methods ###
+
+configure_mysql() {
+  info "Configuring MySQL Server: $(mysql -V)"
+  if grep 'sql-mode' /etc/mysql/mysql.conf.d/mysqld.cnf > /dev/null; then
+    info "Skipping MySQL configuration setup, already done"
+    return
+  fi
+  echo "server_id = 1
+sql-mode="STRICT_TRANS_TABLES,NO_ENGINE_SUBSTITUTION,ERROR_FOR_DIVISION_BY_ZERO,NO_ZERO_DATE,NO_ZERO_IN_DATE,NO_ENGINE_SUBSTITUTION"
+innodb_rollback_on_timeout=1
+innodb_lock_wait_timeout=600
+max_connections=1000
+log-bin=mysql-bin
+binlog-format = 'ROW'" >> /etc/mysql/mysql.conf.d/mysqld.cnf
+  systemctl restart mysql
+}
+
+configure_storage() {
+  info "Configuring NFS Storage"
+  echo "/export  *(rw,async,no_root_squash,no_subtree_check)" > /etc/exports
+  mkdir -p /export/primary /export/secondary
+  exportfs -a
+
+  sed -i -e 's/^RPCMOUNTDOPTS="--manage-gids"$/RPCMOUNTDOPTS="-p 892 --manage-gids"/g' /etc/default/nfs-kernel-server
+  sed -i -e 's/^STATDOPTS=$/STATDOPTS="--port 662 --outgoing-port 2020"/g' /etc/default/nfs-common
+  if ! grep 'NEED_STATD=yes' /etc/default/nfs-common > /dev/null; then
+    echo "NEED_STATD=yes" >> /etc/default/nfs-common
+  fi
+  sed -i -e 's/^RPCRQUOTADOPTS=$/RPCRQUOTADOPTS="-p 875"/g' /etc/default/quota
+
+  service nfs-kernel-server restart
+  info "NFS exports created: $(exportfs)"
+}
+
+configure_host() {
+  info "Configuring KVM on this host"
+  sed -i -e 's/\#vnc_listen.*$/vnc_listen = "0.0.0.0"/g' /etc/libvirt/qemu.conf
+  if ! grep 'LIBVIRTD_ARGS="--listen"' /etc/default/libvirtd > /dev/null; then
+    echo LIBVIRTD_ARGS=\"--listen\" >> /etc/default/libvirtd
+  fi
+  if ! grep 'listen_tcp=1' /etc/libvirt/libvirtd.conf > /dev/null; then
+    echo 'listen_tcp=1' >> /etc/libvirt/libvirtd.conf
+    echo 'listen_tls=0' >> /etc/libvirt/libvirtd.conf
+    echo 'tcp_port = "16509"' >> /etc/libvirt/libvirtd.conf
+    echo 'mdns_adv = 0' >> /etc/libvirt/libvirtd.conf
+    echo 'auth_tcp = "none"' >> /etc/libvirt/libvirtd.conf
+    systemctl mask libvirtd.socket libvirtd-ro.socket libvirtd-admin.socket libvirtd-tls.socket libvirtd-tcp.socket
+    systemctl restart libvirtd
+
+    # Ubuntu: disable apparmor
+    ln -s /etc/apparmor.d/usr.sbin.libvirtd /etc/apparmor.d/disable/
+    ln -s /etc/apparmor.d/usr.lib.libvirt.virt-aa-helper /etc/apparmor.d/disable/
+    apparmor_parser -R /etc/apparmor.d/usr.sbin.libvirtd
+    apparmor_parser -R /etc/apparmor.d/usr.lib.libvirt.virt-aa-helper
+  fi
+
+  if ! kvm-ok; then
+    warn "KVM may not work on your host"
+  else
+    info "KVM host configured"
+    virsh nodeinfo
+  fi
+}
+
+deploy_cloudstack() {
+  if systemctl is-active cloudstack-management > /dev/null; then
+    info "CloudStack Management Server is already running, skipping DB deployment"
+    return
+  fi
+  info "Deploying CloudStack Database"
+  cloudstack-setup-databases cloud:cloud@localhost --deploy-as=root: #-i <cloudbr0 IP here>
+  info "Deploying CloudStack Management Server"
+  cloudstack-setup-management
+}
+
+setup_completed() {
+  info "CloudStack installation completed!"
+  info "Access CloudStack UI at: http://$HOST_IP:8080/client (username: admin, password: password)"
+  echo
+}
+
+deploy_zone() {
+  info "Deploying CloudStack Zone"
+}
+
+display_url() {
+echo "
+█████████████████████████████████████████████████████████████
+█─▄▄▄─█▄─▄███─▄▄─█▄─██─▄█▄─▄▄▀█─▄▄▄▄█─▄─▄─██▀▄─██─▄▄▄─█▄─█─▄█
+█─███▀██─██▀█─██─██─██─███─██─█▄▄▄▄─███─████─▀─██─███▀██─▄▀██
+▀▄▄▄▄▄▀▄▄▄▄▄▀▄▄▄▄▀▀▄▄▄▄▀▀▄▄▄▄▀▀▄▄▄▄▄▀▀▄▄▄▀▀▄▄▀▄▄▀▄▄▄▄▄▀▄▄▀▄▄▀
+
+URL: http://$HOST_IP:8080/client
+User: admin
+Password: password
+"
+}
+
+### Installer: Setup ###
+
+setup_bridge
+HOST_IP=$(ip -f inet addr show $BRIDGE | sed -En -e 's/.*inet ([0-9.]+).*/\1/p')
+info "Bridge $BRIDGE is setup with IP $HOST_IP"
+
+configure_repo
+install_packages
+configure_mysql
+configure_storage
+configure_host
+deploy_cloudstack
+setup_completed
+
+### Installer: Deploy Zone ###
+
+deploy_zone
+
+display_url
