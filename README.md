@@ -6,7 +6,7 @@
 One-liner installer for [Apache CloudStack](https://cloudstack.apache.org), just copy and run the following as `root` user:
 
 ```bash
-curl -sSfL https://c8k.in/stall.sh | bash
+curl -sL https://c8k.in/stall.sh | bash
 ```
 
 > [!IMPORTANT]
