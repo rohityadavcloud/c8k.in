@@ -29,6 +29,7 @@ CS_VERSION=4.18
 INTERFACE=
 BRIDGE=cloudbr0
 HOST_IP=
+GATEWAY=
 
 # --- helper functions for logs ---
 info()
@@ -69,7 +70,7 @@ warn "Work in progress, try again while this is being hacked"
 ### Setup Prerequisites ###
 info "Installing dependencies"
 #apt-get update
-apt-get install -y openssh-server sudo vim htop tar bridge-utils
+apt-get install -y openssh-server sudo wget jq htop tar nmap bridge-utils
 
 ### Setup Bridge ###
 
@@ -215,14 +216,52 @@ deploy_cloudstack() {
   cloudstack-setup-management
 }
 
-setup_completed() {
+install_completed() {
   info "CloudStack installation completed!"
-  info "Access CloudStack UI at: http://$HOST_IP:8080/client (username: admin, password: password)"
+  info "Access CloudStack UI at: http://$HOST_IP:8080/client with username 'admin' and password 'password'"
   echo
 }
 
 deploy_zone() {
   info "Deploying CloudStack Zone"
+  wget -q https://github.com/apache/cloudstack-cloudmonkey/releases/download/6.4.0/cmk.linux.x86-64 -O /usr/bin/cmk > /dev/null
+  chmod +x /usr/bin/cmk
+  cmk set username admin
+  cmk set password password
+  cmk set display json
+  cmk sync
+
+  zone_id=$(cmk create zone dns1=8.8.8.8 internaldns1=$GATEWAY name=AdvZone1 networktype=Advanced | jq '.zone.id')
+  info "Created CloudStack Zone with ID $zone_id"
+
+  phy_id=$(cmk create physicalnetwork name=cloudbr0 zoneid=$zone_id | jq '.physicalnetwork.id')
+  cmk add traffictype traffictype=Management physicalnetworkid=$phy_id
+  cmk add traffictype traffictype=Public physicalnetworkid=$phy_id
+  cmk add traffictype traffictype=Guest physicalnetworkid=$phy_id
+  cmk update physicalnetwork state=Enabled id=$phy_id
+  info "Created CloudStack Physical Network in zone with ID $phy_id"
+
+  nsp_id=$(cmk list networkserviceproviders name=VirtualRouter physicalnetworkid=$phy_id | jq -r '.networkserviceprovider[0].id')
+  vre_id=$(cmk list virtualrouterelements nspid=$nsp_id | jq -r '.virtualrouterelement[0].id')
+  cmk configure virtualrouterelement enabled=true id=$vre_id
+  cmk update networkserviceprovider state=Enabled id=$nsp_id
+  info "Configured VR Network Service Provider for zone"
+
+  nsp_id=$(cmk list networkserviceproviders name=Internallbvm physicalnetworkid=$phy_id | jq -r '.networkserviceprovider[0].id')
+  ilbvm_id=$(cmk list internalloadbalancerelements nspid=$nsp_id | jq -r '.internalloadbalancerelement[0].id')
+  cmk configure internalloadbalancerelement enabled=true id=$ilbvm_id
+  cmk update networkserviceprovider state=Enabled id=$nsp_id
+  info "Configured ILBVM Network Service Provider for zone"
+
+  nsp_id=$(cmk list networkserviceproviders name=VpcVirtualRouter physicalnetworkid=$phy_id | jq -r '.networkserviceprovider[0].id')
+  vpcvre_id=$(cmk list virtualrouterelements nspid=$nsp_id | jq -r '.virtualrouterelement[0].id')
+  cmk configure virtualrouterelement enabled=true id=$vpcvre_id
+  cmk update networkserviceprovider state=Enabled id=$nsp_id
+  info "Configured VPC VR Network Service Provider for zone"
+
+  RANGE=$(echo $GATEWAY | sed 's/\..$//g')
+
+  pod_id=$(cmk create pod name=AdvPod1 zoneid=$zone_id gateway=$GATEWAY netmask=255.255.255.0 startip=$pod_start endip=$pod_end | jq '.pod.id')
 }
 
 display_url() {
@@ -241,7 +280,8 @@ Password: password
 ### Installer: Setup ###
 
 setup_bridge
-HOST_IP=$(ip -f inet addr show $BRIDGE | sed -En -e 's/.*inet ([0-9.]+).*/\1/p')
+export HOST_IP=$(ip -f inet addr show $BRIDGE | sed -En -e 's/.*inet ([0-9.]+).*/\1/p')
+export GATEWAY=$(ip route show 0.0.0.0/0 dev $BRIDGE | cut -d\  -f3)
 info "Bridge $BRIDGE is setup with IP $HOST_IP"
 
 configure_repo
@@ -250,10 +290,13 @@ configure_mysql
 configure_storage
 configure_host
 deploy_cloudstack
-setup_completed
+
+install_completed
 
 ### Installer: Deploy Zone ###
 
-deploy_zone
+#deploy_zone
+
+### Installer: Finish ###
 
 display_url
