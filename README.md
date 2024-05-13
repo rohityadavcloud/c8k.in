@@ -3,7 +3,7 @@
 > [!NOTE]
 > Only supports CloudStack on Ubuntu with x86_64 KVM and tested with Ubuntu 22.04 LTS (x86_64)
 
-One-liner installer for [Apache CloudStack](https://cloudstack.apache.org), just copy the run the following as `root` user:
+One-liner installer for [Apache CloudStack](https://cloudstack.apache.org), just copy and run the following as `root` user:
 
 ```bash
 curl -sSfL https://c8k.in/stall.sh | bash
