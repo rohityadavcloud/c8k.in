@@ -259,9 +259,11 @@ deploy_zone() {
   cmk update networkserviceprovider state=Enabled id=$nsp_id
   info "Configured VPC VR Network Service Provider for zone"
 
+  # TODO: use nmap to scan for free IPs in the range
+  # sudo nmap -v -sn -n 192.168.1.0/24 -oG - | awk '/Status: Down/{print $2}'
   RANGE=$(echo $GATEWAY | sed 's/\..$//g')
-
   pod_id=$(cmk create pod name=AdvPod1 zoneid=$zone_id gateway=$GATEWAY netmask=255.255.255.0 startip=$pod_start endip=$pod_end | jq '.pod.id')
+
 }
 
 display_url() {
