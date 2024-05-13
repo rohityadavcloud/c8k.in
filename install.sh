@@ -1,11 +1,9 @@
 #!/usr/bin/env bash
 # c8k.in/stall.sh - Easiest Apache CloudStack Installer
+# Author: Rohit Yadav <rohit@apache.org>
 # Install with this command (from your Ubuntu host):
 #
 # curl -sSfL https://c8k.in/stall.sh | bash
-# Make sure you have `curl` installed
-#
-# Author: Rohit Yadav <rohit@apache.org>
 #
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
@@ -41,3 +39,47 @@ fatal()
     echo '[ERROR] ' "$@" >&2
     exit 1
 }
+
+### Intro ###
+echo "
+░█████╗░░█████╗░██╗░░██╗░░░██╗███╗░░██╗
+██╔══██╗██╔══██╗██║░██╔╝░░░██║████╗░██║
+██║░░╚═╝╚█████╔╝█████═╝░░░░██║██╔██╗██║
+██║░░██╗██╔══██╗██╔═██╗░░░░██║██║╚████║
+╚█████╔╝╚█████╔╝██║░╚██╗██╗██║██║░╚███║
+░╚════╝░░╚════╝░╚═╝░░╚═╝╚═╝╚═╝╚═╝░░╚══╝
+CloudStack Installer By 🅁🄾🄷🄸🅃 🅈🄰🄳🄰🅅
+"
+info "Installing Apache CloudStack All-In-One-Box"
+info "NOTE: this works only on Ubuntu!"
+warn "Work in progress, try again while this is being hacked"
+
+### Setup Prerequisites ###
+info "Installing dependencies"
+apt-get update
+apt-get install -y openssh-server sudo vim htop tar bridge-utils
+
+### Setup Bridge ###
+
+echo " network:
+   version: 2
+   renderer: networkd
+   ethernets:
+     eno1:
+       dhcp4: false
+       dhcp6: false
+       optional: true
+   bridges:
+     cloudbr0:
+       addresses: [192.168.1.10/24]
+       routes:
+        - to: default
+          via: 192.168.1.1
+       nameservers:
+         addresses: [1.1.1.1,8.8.8.8]
+       interfaces: [eno1]
+       dhcp4: false
+       dhcp6: false
+       parameters:
+         stp: false
+         forward-delay: 0"
