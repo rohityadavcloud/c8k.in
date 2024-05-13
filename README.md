@@ -1,4 +1,4 @@
-# c8k.in
+# [c8k.in](https://github.com/cloudstack/c8k.in)
 
 > [!NOTE]
 > Only supports CloudStack on Ubuntu with x86_64 KVM and tested with Ubuntu 22.04 LTS (x86_64)
@@ -15,3 +15,5 @@ curl -sSfL https://c8k.in/stall.sh | bash
 Created by [@rohityadavcloud](https://github.com/rohityadavcloud) as part of a hackathon.
 
 [Discuss further here](https://github.com/apache/cloudstack/discussions)
+
+Source: https://github.com/cloudstack/c8k.in
