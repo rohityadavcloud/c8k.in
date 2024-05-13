@@ -51,35 +51,57 @@ echo "
 CloudStack Installer By 🅁🄾🄷🄸🅃 🅈🄰🄳🄰🅅
 "
 info "Installing Apache CloudStack All-In-One-Box"
-info "NOTE: this works only on Ubuntu!"
+info "NOTE: this works only on Ubuntu, and run as 'root' user!"
+
+if [[ $EUID -ne 0 ]]; then
+   fatal "This script must be run as root"
+   exit 1
+fi
+
 warn "Work in progress, try again while this is being hacked"
 
 ### Setup Prerequisites ###
 info "Installing dependencies"
-apt-get update
+#apt-get update
 apt-get install -y openssh-server sudo vim htop tar bridge-utils
 
 ### Setup Bridge ###
 
-echo " network:
+#FIXME: we want to avoid virtual nics
+# ls -l /sys/class/net/ | grep -v virtual
+
+interface=$(ls /sys/class/net/ | grep -v 'lo' | head -1)
+gateway=$(ip route show 0.0.0.0/0 dev ens3 | cut -d\  -f3)
+hostip=$(ip -f inet addr show $interface | sed -En -e 's/.*inet ([0-9.]+).*/\1/p')
+
+info "Setting up bridge on $interface which has IP $hostip and gateway $gateway"
+
+echo "network:
    version: 2
    renderer: networkd
    ethernets:
-     eno1:
+     $interface:
        dhcp4: false
        dhcp6: false
        optional: true
    bridges:
      cloudbr0:
-       addresses: [192.168.1.10/24]
+       addresses: [$hostip/24]
        routes:
         - to: default
-          via: 192.168.1.1
+          via: $gateway
        nameservers:
-         addresses: [1.1.1.1,8.8.8.8]
-       interfaces: [eno1]
+         addresses: [8.8.8.8, 1.1.1.1]
+       interfaces: [$interface]
        dhcp4: false
        dhcp6: false
        parameters:
          stp: false
-         forward-delay: 0"
+         forward-delay: 0" > /etc/netplan/01-netcfg.yaml
+
+info "Disabling cloud-init netplan config"
+rm -f /etc/netplan/50-cloud-init.yaml
+echo "network: {config: disabled}" > /etc/cloud/cloud.cfg.d/99-disable-network-config.cfg
+
+netplan generate
+netplan apply
