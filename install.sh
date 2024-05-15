@@ -229,6 +229,7 @@ deploy_zone() {
   cmk set username admin
   cmk set password password
   cmk set display json
+  cmk set asyncblock true
   cmk sync
 
   zone_id=$(cmk create zone dns1=8.8.8.8 internaldns1=$GATEWAY name=AdvZone1 networktype=Advanced | jq '.zone.id')
@@ -261,9 +262,35 @@ deploy_zone() {
 
   # TODO: use nmap to scan for free IPs in the range
   # sudo nmap -v -sn -n 192.168.1.0/24 -oG - | awk '/Status: Down/{print $2}'
+  # FIXME: prompt for IP range?
   RANGE=$(echo $GATEWAY | sed 's/\..$//g')
-  pod_id=$(cmk create pod name=AdvPod1 zoneid=$zone_id gateway=$GATEWAY netmask=255.255.255.0 startip=$pod_start endip=$pod_end | jq '.pod.id')
+  pod_start=
+  pod_end=
+  pod_gw=$GATEWAY
+  pod_mask=255.255.255.0
+  ip_start=
+  ip_end=
+  ip_gw=$GATEWAY
+  ip_mask=255.255.255.0
 
+  pod_id=$(cmk create pod name=AdvPod1 zoneid=$zone_id gateway=$pod_gw netmask=$pod_mask startip=$pod_start endip=$pod_end | jq '.pod.id')
+
+  cmk create vlaniprange zoneid=$zone_id vlan=untagged gateway=$ip_gw netmask=$ip_mask startip=$ip_start endip=$ip_end forvirtualnetwork=true
+
+  cmk update physicalnetwork id=$phy_id vlan=100-200
+
+  cluster_id=$(cmk add cluster zoneid=$zone_id hypervisor=KVM clustertype=CloudManaged podid=$pod_id clustername=Cluster1 | jq '.cluster[0].id')
+
+  # Add by CloudStack Management Server's public key
+  mkdir -p /root/.ssh
+  cat /var/lib/cloudstack/management/.ssh/id_rsa.pub >> /root/.ssh/authorized_keys
+  cmk add host zoneid=$zone_id podid=$pod_id clusterid=$cluster_id clustertype=CloudManaged hypervisor=KVM username=root url=http://$HOST_IP
+
+  cmk create storagepool zoneid=$zone_id podid=$pod_id clusterid=$cluster_id name=Primary-StoragePool1 scope=zone hypervisor=KVM url=nfs://$HOST_IP/export/primary
+
+  cmk add imagestore provider=NFS zoneid=$zone_id name=Secondary-StoragePool1 url=nfs://$HOST_IP/export/secondary
+
+  cmk update zone allocationstate=Enabled id=$zone_id
 }
 
 display_url() {
