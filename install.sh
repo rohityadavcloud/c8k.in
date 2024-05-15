@@ -327,7 +327,10 @@ install_completed
 ### Installer: Deploy Zone ###
 
 # FIXME: configuration global setting & restart mgmt server
+
 deploy_zone
+
+# FIXME: register Ubuntu template & register ssh-key of this host, configure CKS etc.
 
 ### Installer: Finish ###
 
