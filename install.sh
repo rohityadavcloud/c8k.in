@@ -72,6 +72,8 @@ info "Installing dependencies"
 #apt-get update
 apt-get install -y openssh-server sudo wget jq htop tar nmap bridge-utils
 
+# FIXME: check for host spec (min 4-8G RAM?) /dev/kvm and
+
 ### Setup Bridge ###
 
 setup_bridge() {
@@ -178,7 +180,7 @@ configure_storage() {
 configure_host() {
   info "Configuring KVM on this host"
   sed -i -e 's/\#vnc_listen.*$/vnc_listen = "0.0.0.0"/g' /etc/libvirt/qemu.conf
-  if ! grep 'LIBVIRTD_ARGS="--listen"' /etc/default/libvirtd > /dev/null; then
+  if ! grep '^LIBVIRTD_ARGS="--listen"' /etc/default/libvirtd > /dev/null; then
     echo LIBVIRTD_ARGS=\"--listen\" >> /etc/default/libvirtd
   fi
   if ! grep 'listen_tcp=1' /etc/libvirt/libvirtd.conf > /dev/null; then
@@ -191,8 +193,8 @@ configure_host() {
     systemctl restart libvirtd
 
     # Ubuntu: disable apparmor
-    ln -s /etc/apparmor.d/usr.sbin.libvirtd /etc/apparmor.d/disable/
-    ln -s /etc/apparmor.d/usr.lib.libvirt.virt-aa-helper /etc/apparmor.d/disable/
+    ln -sf /etc/apparmor.d/usr.sbin.libvirtd /etc/apparmor.d/disable/
+    ln -sf /etc/apparmor.d/usr.lib.libvirt.virt-aa-helper /etc/apparmor.d/disable/
     apparmor_parser -R /etc/apparmor.d/usr.sbin.libvirtd
     apparmor_parser -R /etc/apparmor.d/usr.lib.libvirt.virt-aa-helper
   fi
@@ -264,12 +266,12 @@ deploy_zone() {
   # sudo nmap -v -sn -n 192.168.1.0/24 -oG - | awk '/Status: Down/{print $2}'
   # FIXME: prompt for IP range?
   RANGE=$(echo $GATEWAY | sed 's/\..$//g')
-  pod_start=
-  pod_end=
+  pod_start=192.168.10.200
+  pod_end=192.168.10.220
   pod_gw=$GATEWAY
   pod_mask=255.255.255.0
-  ip_start=
-  ip_end=
+  ip_start=192.168.10.221
+  ip_end=192.168.10.240
   ip_gw=$GATEWAY
   ip_mask=255.255.255.0
 
@@ -284,7 +286,7 @@ deploy_zone() {
   # Add by CloudStack Management Server's public key
   mkdir -p /root/.ssh
   cat /var/lib/cloudstack/management/.ssh/id_rsa.pub >> /root/.ssh/authorized_keys
-  cmk add host zoneid=$zone_id podid=$pod_id clusterid=$cluster_id clustertype=CloudManaged hypervisor=KVM username=root url=http://$HOST_IP
+  cmk add host zoneid=$zone_id podid=$pod_id clusterid=$cluster_id clustertype=CloudManaged hypervisor=KVM username=root password= url=http://$HOST_IP
 
   cmk create storagepool zoneid=$zone_id podid=$pod_id clusterid=$cluster_id name=Primary-StoragePool1 scope=zone hypervisor=KVM url=nfs://$HOST_IP/export/primary
 
@@ -324,7 +326,8 @@ install_completed
 
 ### Installer: Deploy Zone ###
 
-#deploy_zone
+# FIXME: configuration global setting & restart mgmt server
+deploy_zone
 
 ### Installer: Finish ###
 
