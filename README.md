@@ -1,7 +1,9 @@
 # [c8k.in](https://github.com/cloudstack/c8k.in): One-liner installer for [Apache CloudStack](https://cloudstack.apache.org)
 
 > [!NOTE]
-> Only supports CloudStack installation on Ubuntu with x86_64 KVM and tested with Ubuntu 22.04 LTS (x86_64). Please use this on a throwaway host or a VM (with hardware acceleration) that wouldn't hurt you to lose, in an [RFC1918 local private network](https://en.wikipedia.org/wiki/Private_network).
+> Only supports CloudStack installation on Ubuntu with x86_64 KVM and tested with Ubuntu 22.04 LTS (x86_64). Please use this on a throwaway host or a VM (with hardware acceleration) that wouldn't hurt you to lose, in an [RFC1918 local private network](https://en.wikipedia.org/wiki/Private_network). This is currently in `beta` and open for users testing and issue reporting.
+
+![beta](https://github.com/rohityadavcloud/c8k.in/assets/95203/3c5f9d46-6e33-48f7-9938-a5348e37814a)
 
 To install and deploy [CloudStack](https://cloudstack.apache.org), just copy and run the following as `root` user:
 
