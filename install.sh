@@ -266,12 +266,12 @@ deploy_zone() {
   # sudo nmap -v -sn -n 192.168.1.0/24 -oG - | awk '/Status: Down/{print $2}'
   # FIXME: prompt for IP range?
   RANGE=$(echo $GATEWAY | sed 's/\..$//g')
-  pod_start=192.168.10.200
-  pod_end=192.168.10.220
+  pod_start="$RANGE.200"
+  pod_end="$RANGE.220"
   pod_gw=$GATEWAY
   pod_mask=255.255.255.0
-  ip_start=192.168.10.221
-  ip_end=192.168.10.240
+  ip_start="$RANGE.221"
+  ip_end="$RANGE.240"
   ip_gw=$GATEWAY
   ip_mask=255.255.255.0
 
