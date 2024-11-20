@@ -30,6 +30,7 @@ INTERFACE=
 BRIDGE=cloudbr0
 HOST_IP=
 GATEWAY=
+DNS="8.8.8.8, 1.1.1.1"
 
 # --- helper functions for logs ---
 info()
@@ -77,47 +78,59 @@ apt-get install -y openssh-server sudo wget jq htop tar nmap bridge-utils
 ### Setup Bridge ###
 
 setup_bridge() {
-  if brctl show $BRIDGE > /dev/null; then
+  if brctl show $BRIDGE > /dev/null 2>&1; then
+    info "Bridge $BRIDGE already exists, skipping create..."
     return
   fi
 
-  #FIXME: we want to avoid virtual nics
-  # ls -l /sys/class/net/ | grep -v virtual
-  interface=$(ls /sys/class/net/ | grep -v 'lo' | head -1)
-  gateway=$(ip route show 0.0.0.0/0 dev ens3 | cut -d\  -f3)
-  hostip=$(ip -f inet addr show $interface | sed -En -e 's/.*inet ([0-9.]+).*/\1/p')
+  interface=$(find /sys/class/net -type l -not -lname '*virtual*' -printf '%f\n' | sort | head -1)
+  gateway=$(ip route show 0.0.0.0/0 dev $interface | cut -d ' ' -f 3)
+  hostipandsub=$(ip -4 -br addr show ens192 | awk '{ print $3; }' )
   info "Setting up bridge on $interface which has IP $hostip and gateway $gateway"
-  echo "network:
-   version: 2
-   renderer: networkd
-   ethernets:
-     $interface:
-       dhcp4: false
-       dhcp6: false
-       optional: true
-   bridges:
-     $BRIDGE:
-       addresses: [$hostip/24]
-       routes:
+
+  cat << EOF > /etc/netplan/01-netcfg.yaml
+network:
+  version: 2
+  renderer: networkd
+  ethernets:
+    $interface:
+      dhcp4: false
+      dhcp6: false
+      optional: true
+  bridges:
+    $BRIDGE:
+      addresses: [$hostipandsub]
+      routes:
         - to: default
           via: $gateway
-       nameservers:
-         addresses: [8.8.8.8, 1.1.1.1]
-       interfaces: [$interface]
-       dhcp4: false
-       dhcp6: false
-       parameters:
-         stp: false
-         forward-delay: 0" > /etc/netplan/01-netcfg.yaml
+      nameservers:
+        addresses: [$DNS]
+      interfaces: [$interface]
+      dhcp4: false
+      dhcp6: false
+      parameters:
+        stp: false
+        forward-delay: 0
+EOF
+
+  # FIX netplan complaining about permissions
+  chmod 600 /etc/netplan/01-netcfg.yaml
 
   info "Disabling cloud-init netplan config"
   rm -f /etc/netplan/50-cloud-init.yaml
-  echo "network: {config: disabled}" > /etc/cloud/cloud.cfg.d/99-disable-network-config.cfg
+  if [[ ! -f "/etc/cloud/cloud.cfg.d/99-disable-network-config.cfg" && ! -f "/etc/cloud/cloud.cfg.d/99_disable-network-config.cfg" ]]; then
+    echo "network: {config: disabled}" > /etc/cloud/cloud.cfg.d/99-disable-network-config.cfg
+  fi
+
+  # FIXME workaround for VMware tools generated network config
+  if [[ -f "/etc/netplan/99-netcfg-vmware.yaml" ]]; then
+    mv /etc/netplan/99-netcfg-vmware.yaml /etc/netplan/99-netcfg-vmware.yaml.bak
+  fi
 
   netplan generate
   netplan apply
 
-  export INTERFACE=$interface
+  export INTERFACE="$interface"
 }
 
 ### Setup CloudStack Packages ###
@@ -146,23 +159,35 @@ install_packages() {
 
 configure_mysql() {
   info "Configuring MySQL Server: $(mysql -V)"
-  if grep 'sql-mode' /etc/mysql/mysql.conf.d/mysqld.cnf > /dev/null; then
+  if [[ -f "/etc/mysql/mysql.conf.d/cloudstack.cnf" ]]; then
     info "Skipping MySQL configuration setup, already done"
     return
   fi
-  echo "server_id = 1
-sql-mode="STRICT_TRANS_TABLES,NO_ENGINE_SUBSTITUTION,ERROR_FOR_DIVISION_BY_ZERO,NO_ZERO_DATE,NO_ZERO_IN_DATE,NO_ENGINE_SUBSTITUTION"
-innodb_rollback_on_timeout=1
-innodb_lock_wait_timeout=600
-max_connections=1000
-log-bin=mysql-bin
-binlog-format = 'ROW'" >> /etc/mysql/mysql.conf.d/mysqld.cnf
+
+  sqlmode="$(mysql -B -e "show global variables like 'sql_mode'" | grep sql_mode | awk '{ print $2; }' | sed -e 's/ONLY_FULL_GROUP_BY,//')"
+
+cat > /etc/mysql/mysql.conf.d/cloudstack.cnf <<EOF
+[mysqld]
+server_id = 1
+sql_mode = "$sqlmode"
+innodb_rollback_on_timeout = 1
+innodb_lock_wait_timeout = 600
+max_connections = 1000
+log_bin = mysql-bin
+binlog_format = "ROW"
+EOF
+
   systemctl restart mysql
 }
 
 configure_storage() {
   info "Configuring NFS Storage"
-  echo "/export  *(rw,async,no_root_squash,no_subtree_check)" > /etc/exports
+  if grep "^/export " /etc/exports > /dev/null; then
+    info "Skipping NFS Storage configuration setup, already done"
+    return
+  fi
+
+  echo "/export  *(rw,async,no_root_squash,no_subtree_check)" >> /etc/exports
   mkdir -p /export/primary /export/secondary
   exportfs -a
 
@@ -233,6 +258,8 @@ deploy_zone() {
   cmk set display json
   cmk set asyncblock true
   cmk sync
+
+  echo bla
 
   zone_id=$(cmk create zone dns1=8.8.8.8 internaldns1=$GATEWAY name=AdvZone1 networktype=Advanced | jq '.zone.id')
   info "Created CloudStack Zone with ID $zone_id"
@@ -311,8 +338,8 @@ Password: password
 ### Installer: Setup ###
 
 setup_bridge
-export HOST_IP=$(ip -f inet addr show $BRIDGE | sed -En -e 's/.*inet ([0-9.]+).*/\1/p')
-export GATEWAY=$(ip route show 0.0.0.0/0 dev $BRIDGE | cut -d\  -f3)
+export HOST_IP=$(ip -4 -br addr show $BRIDGE | awk '{ print $3; }' | sed -e 's/\/[0-9]\+//')
+export GATEWAY=$(ip route show 0.0.0.0/0 dev $BRIDGE | cut -d ' '  -f 3)
 info "Bridge $BRIDGE is setup with IP $HOST_IP"
 
 configure_repo
