@@ -141,7 +141,7 @@ configure_repo() {
   mkdir -p /etc/apt/keyrings
   wget -O- https://download.cloudstack.org/release.asc 2>/dev/null | gpg --dearmor | sudo tee /etc/apt/keyrings/cloudstack.gpg > /dev/null
   # NOTE: debian-based distro packages are now release agnostic
-  echo deb [signed-by=/etc/apt/keyrings/cloudstack.gpg] https://download.cloudstack.org/ubuntu noble $CS_VERSION / > /etc/apt/sources.list.d/cloudstack.list
+  echo deb [signed-by=/etc/apt/keyrings/cloudstack.gpg] https://download.cloudstack.org/ubuntu noble $CS_VERSION > /etc/apt/sources.list.d/cloudstack.list
   apt-get update
 }
 
