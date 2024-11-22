@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # c8k.in/stall.sh - Easiest Apache CloudStack Installer
-# Author: Rohit Yadav <rohit@apache.org>
+# Author: Rohit Yadav <rohit@apache.org> and other contributors
+#
 # Install with this command (from your Ubuntu host):
 #
 # curl -sSfL https://c8k.in/stall.sh | bash
@@ -25,7 +26,7 @@
 set -e
 set -o noglob
 
-CS_VERSION=4.18
+CS_VERSION=4.19
 INTERFACE=
 BRIDGE=cloudbr0
 HOST_IP=
@@ -138,8 +139,9 @@ EOF
 configure_repo() {
   info "Configuring CloudStack $CS_VERSION repo"
   mkdir -p /etc/apt/keyrings
-  wget -O- http://packages.shapeblue.com/release.asc 2>/dev/null | gpg --dearmor | sudo tee /etc/apt/keyrings/cloudstack.gpg > /dev/null
-  echo deb [signed-by=/etc/apt/keyrings/cloudstack.gpg] http://packages.shapeblue.com/cloudstack/upstream/debian/$CS_VERSION / > /etc/apt/sources.list.d/cloudstack.list
+  wget -O- https://download.cloudstack.org/release.asc 2>/dev/null | gpg --dearmor | sudo tee /etc/apt/keyrings/cloudstack.gpg > /dev/null
+  # NOTE: debian-based distro packages are now release agnostic
+  echo deb [signed-by=/etc/apt/keyrings/cloudstack.gpg] https://download.cloudstack.org/ubuntu noble $CS_VERSION / > /etc/apt/sources.list.d/cloudstack.list
   apt-get update
 }
 
