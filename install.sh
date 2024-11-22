@@ -259,7 +259,7 @@ deploy_zone() {
   cmk set asyncblock true
   cmk sync
 
-  echo bla
+  info "Starting Zone deployment"
 
   zone_id=$(cmk create zone dns1=8.8.8.8 internaldns1=$GATEWAY name=AdvZone1 networktype=Advanced | jq '.zone.id')
   info "Created CloudStack Zone with ID $zone_id"
